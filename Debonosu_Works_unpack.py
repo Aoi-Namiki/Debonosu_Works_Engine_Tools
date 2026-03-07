@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""
-depress.py
-
-解包工具：按照逆向得到的格式解析 PAK 头、索引（原始 DEFLATE）与文件数据。
-索引条目布局：offset(int64) + usize(int64) + csize(int64) + flags(uint32) + time(24 bytes) + Shift-JIS name\0
-"""
 import argparse
-import json
 import pathlib
 import struct
 import sys
@@ -31,7 +24,6 @@ def read_header(pak_bytes: bytes):
     if magic != b"PAK\x00":
         raise PakError(f"魔数不匹配: {magic!r}")
 
-    # 低 16 位放扩展头偏移；其余位在原样本里也有值，这里兼容两种取法。
     header_offset = raw_header & 0xFFFF
     candidates = [header_offset]
     if raw_header not in candidates:
@@ -84,12 +76,12 @@ def parse_entries(index_data: bytes, start: int, count: int, prefix: pathlib.Pat
         attrs = flags
         path = prefix / name if prefix != pathlib.Path() else pathlib.Path(name)
 
-        if attrs & 0x10:  # 目录
+        if attrs & 0x10:
             child_count = usize
             entries.append({"type": "dir", "path": path, "child_count": child_count, "attributes": attrs, "time_bytes": time_bytes})
             pos, child_entries = parse_entries(index_data, pos, child_count, path)
             entries.extend(child_entries)
-        else:  # 文件
+        else:
             entries.append(
                 {
                     "type": "file",
@@ -132,24 +124,16 @@ def extract_file(pak_bytes: bytes, entry, base_offset: int, out_dir: pathlib.Pat
     target.write_bytes(payload)
 
 
-def serialize_entries(entries):
-    """将 Path 和 bytes 转为可 JSON 序列化。"""
-    out = []
-    for e in entries:
-        item = {**e, "path": str(e["path"])}
-        if "time_bytes" in item:
-            item["time_hex"] = item["time_bytes"].hex()
-            del item["time_bytes"]
-        out.append(item)
-    return out
-
 def main():
     parser = argparse.ArgumentParser(description="Extract game.pak contents")
     parser.add_argument("pak", type=pathlib.Path, help="path to game.pak")
     parser.add_argument("-o", "--out", type=pathlib.Path, default=pathlib.Path("extracted"), help="output directory")
     parser.add_argument("--list", action="store_true", help="only list entries")
-    parser.add_argument("--dump-index", type=pathlib.Path, help="导出索引为 JSON，便于查阅/汉化时对照")
     args = parser.parse_args()
+
+    if args.pak.suffix.lower() != '.pak':
+        print("Error: Input file must have a .pak extension", file=sys.stderr)
+        sys.exit(1)
 
     pak_bytes = args.pak.read_bytes()
     meta = read_header(pak_bytes)
@@ -179,22 +163,7 @@ def main():
                     f"[FILE] {entry['path']}  off=0x{entry['offset']:X}  "
                     f"csize={entry['compressed_size']}  usize={entry['uncompressed_size']}"
                 )
-        if args.dump_index:
-            payload = {
-                "header": meta,
-                "entries": serialize_entries(entries),
-            }
-            args.dump_index.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"索引已导出: {args.dump_index}")
         return
-
-    if args.dump_index:
-        payload = {
-            "header": meta,
-            "entries": serialize_entries(entries),
-        }
-        args.dump_index.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"索引已导出: {args.dump_index}")
 
     for entry in files:
         extract_file(pak_bytes, entry, meta["data_offset"], args.out)
