@@ -50,7 +50,7 @@ def read_lstring(data: memoryview, endian: str, size_t_size: int, pos: int) -> t
     raw_pos = pos
     raw = data[pos : pos + n]
     pos += n
-    return bytes(raw[:-1]), pos, raw_pos, n - 1  # exclude null terminator
+    return bytes(raw[:-1]), pos, raw_pos, n - 1
 
 
 def process_proto(
@@ -65,12 +65,12 @@ def process_proto(
     encoding: str,
     counter: List[int],
 ) -> int:
-    _, pos, _, _ = read_lstring(data, endian, size_t_size, pos)  # source name
-    _, pos = read_int(data, endian, int_size, pos)  # line_defined
-    _, pos = read_int(data, endian, int_size, pos)  # last_line_defined
-    pos += 4  # nups,numparams,is_vararg,maxstacksize
+    _, pos, _, _ = read_lstring(data, endian, size_t_size, pos)
+    _, pos = read_int(data, endian, int_size, pos)
+    _, pos = read_int(data, endian, int_size, pos)
+    pos += 4
     sizecode, pos = read_int(data, endian, int_size, pos)
-    pos += sizecode * instr_size  # instructions
+    pos += sizecode * instr_size
     sizek, pos = read_int(data, endian, int_size, pos)
     for _ in range(sizek):
         t = data[pos]
@@ -91,7 +91,6 @@ def process_proto(
                     text = s.decode(encoding, errors="strict")
                 except Exception:
                     text = s.decode(encoding, errors="replace")
-                # 将换行转义为 \r \n，保持单行便于编辑
                 text_disp = text.replace("\r", "\\r").replace("\n", "\\n")
                 out.append(f"○{counter[0]:05d}○ {text_disp}")
                 out.append(f"●{counter[0]:05d}● {text_disp}")
@@ -119,7 +118,13 @@ def main() -> None:
     ap.add_argument("input", type=Path, help=".scb/.luac file or directory")
     ap.add_argument("-o", "--out", type=Path, help="output file (for single input) or output directory (for folder)")
     ap.add_argument("--src-encoding", default="shift_jis", help="decode strings with this encoding (default shift_jis)")
+    ap.add_argument("--utf8", action="store_true", help="use UTF-8 encoding (overrides --src-encoding)")
     args = ap.parse_args()
+
+    if args.utf8:
+        encoding = "utf-8"
+    else:
+        encoding = args.src_encoding
 
     in_path = args.input
     if in_path.is_file():
@@ -136,7 +141,7 @@ def main() -> None:
             number_size,
             12,
             strings,
-            args.src_encoding,
+            encoding,
             [-1],
         )
         blocks = ["\n".join(strings[i : i + 2]) for i in range(0, len(strings), 2)]
@@ -175,11 +180,11 @@ def main() -> None:
             number_size,
             12,
             strings,
-            args.src_encoding,
+            encoding,
             [-1],
         )
         rel = scb.relative_to(in_path)
-        dst = (out_dir / rel).with_suffix(rel.suffix + ".txt")  # e.g. foo.scb.txt
+        dst = (out_dir / rel).with_suffix(rel.suffix + ".txt")
         dst.parent.mkdir(parents=True, exist_ok=True)
         blocks = ["\n".join(strings[i : i + 2]) for i in range(0, len(strings), 2)]
         dst.write_text("\n\n".join(blocks), encoding="utf-8", newline="\n")
