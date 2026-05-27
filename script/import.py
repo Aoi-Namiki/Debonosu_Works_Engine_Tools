@@ -83,14 +83,13 @@ def patch_const_string(raw: bytes, idx: int, mapping: Dict[int, str], src_enc: s
     new = mapping.get(idx)
     if new is None:
         return raw
-    # 计算当前常量的“导出格式”文本，用于判断是否未修改
     try:
         cur_text = raw.decode(src_enc, errors="strict")
     except Exception:
         cur_text = raw.decode(src_enc, errors="replace")
     cur_disp = cur_text.replace("\r", "\\r").replace("\n", "\\n")
     if new == cur_disp:
-        return raw  # 未改动，保持原字节
+        return raw
     new_text = new.replace("\\r", "\r").replace("\\n", "\n")
     return new_text.encode(dst_enc, errors="strict")
 
@@ -193,7 +192,6 @@ def process_proto(
 
 def patch_file(in_path: Path, out_path: Path, mapping: Dict[int, str], src_enc: str, dst_enc: str) -> None:
     data = in_path.read_bytes()
-    # 如果没有映射条目，直接拷贝原文件
     if not mapping:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(data)
@@ -219,13 +217,11 @@ def patch_file(in_path: Path, out_path: Path, mapping: Dict[int, str], src_enc: 
             [-1],
         )
     except UnicodeEncodeError as e:
-        # 提取无法编码的具体字符
         obj = e.object
         start = e.start
         end = e.end
-        bad_char = obj[start:end]  # 无法编码的字符片段
+        bad_char = obj[start:end]
         print(f"[FAIL] {in_path.name}: 无法编码字符 '{bad_char}' 使用编码 {e.encoding}")
-        # 跳过此文件，不写入输出
         return
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(bytes(out))
@@ -238,7 +234,19 @@ def main() -> None:
     ap.add_argument("output", type=Path, help="output file (single) or output directory (folder)")
     ap.add_argument("--src-encoding", default="shift_jis", help="decode existing strings with this encoding")
     ap.add_argument("--dst-encoding", default="shift_jis", help="encode new strings with this encoding")
+    ap.add_argument("--utf8", action="store_true", help="use UTF-8 for both source and destination (overrides --src-encoding and --dst-encoding)")
+    ap.add_argument("--to-gbk", action="store_true", help="convert from Shift_JIS source to GBK destination (overrides --utf8 and --src-encoding/--dst-encoding)")
     args = ap.parse_args()
+
+    if args.to_gbk:
+        src_enc = "shift_jis"
+        dst_enc = "gbk"
+    elif args.utf8:
+        src_enc = "utf-8"
+        dst_enc = "utf-8"
+    else:
+        src_enc = args.src_encoding
+        dst_enc = args.dst_encoding
 
     def load_mapping(path: Path) -> Dict[int, str]:
         data = path.read_bytes()
@@ -259,7 +267,6 @@ def main() -> None:
             try:
                 head, txt = line[1:].split("●", 1)
                 idx = int(head)
-                # 提取后的格式是「●00000● 文本」，仅移除分隔用的单个空格，其余空格原样保留
                 if txt.startswith(" "):
                     txt = txt[1:]
                 mapping[idx] = txt
@@ -275,7 +282,7 @@ def main() -> None:
         if map_dir:
             raise SystemExit("Single .scb import requires a mapping file, not a directory")
         mapping = load_mapping(args.map)
-        patch_file(in_path, out_path, mapping, args.src_encoding, args.dst_encoding)
+        patch_file(in_path, out_path, mapping, src_enc, dst_enc)
         return
 
     if not in_path.is_dir():
@@ -302,7 +309,7 @@ def main() -> None:
                 mapping_cur = load_mapping(map_txt)
             else:
                 mapping_cur = mapping_all
-            patch_file(scb, dst, mapping_cur, args.src_encoding, args.dst_encoding)
+            patch_file(scb, dst, mapping_cur, src_enc, dst_enc)
             print(f"[OK] {rel} -> {dst}")
         except Exception as exc:
             print(f"[FAIL] {rel}: {exc}")
